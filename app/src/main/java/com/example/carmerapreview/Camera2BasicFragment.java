@@ -25,6 +25,8 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ImageFormat;
@@ -71,6 +73,9 @@ import android.view.SurfaceHolder;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -107,6 +112,7 @@ public class Camera2BasicFragment extends Fragment
     private TextView tv_location;
     private TextView RA_value;
     private TextView name;
+    private Button btn_take_photo;
 
     private float anglenew;
     private double DecS;
@@ -253,7 +259,7 @@ public class Camera2BasicFragment extends Fragment
     private CameraDevice mCameraDevice;
 
     /**
-     * The {@link android.util.Size} of camera preview.
+     * The {@link Size} of camera preview.
      */
     private Size mPreviewSize;
 
@@ -319,10 +325,76 @@ public class Camera2BasicFragment extends Fragment
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
+            Image image = reader.acquireNextImage();
+            showDialog(image);
+            mBackgroundHandler.post(new ImageSaver(image, mFile));
         }
 
     };
+
+    private void showDialog(Image imageFile) {
+        View view = LayoutInflater.from(getContext()).inflate(R.layout.dialog_preview,null,false);
+
+        final AlertDialog normalDialog =
+                new AlertDialog.Builder(getActivity(), R.style.Dialog_Fullscreen).setView(view).create();
+        view.findViewById(R.id.btn_cancel).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                normalDialog.dismiss();
+            }
+        });
+        view.findViewById(R.id.bdtn_submit).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                normalDialog.dismiss();
+            }
+        });
+
+        ImageView image = view.findViewById(R.id.image_view);
+
+        ByteBuffer buffer = imageFile.getPlanes()[0].getBuffer();
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        image.setImageBitmap(rotateBitmap(bitmap, 90));
+
+        normalDialog.show();
+
+    }
+
+    public static class ScreenUtils {
+
+        /**
+         * 获取屏幕高度(px)
+         */
+        public static int getScreenHeight(Context context) {
+            return context.getResources().getDisplayMetrics().heightPixels;
+        }
+        /**
+         * 获取屏幕宽度(px)
+         */
+        public static int getScreenWidth(Context context) {
+            return context.getResources().getDisplayMetrics().widthPixels;
+        }
+
+    }
+
+    private Bitmap rotateBitmap(Bitmap origin, float alpha) {
+        if (origin == null) {
+            return null;
+        }
+        int width = origin.getWidth();
+        int height = origin.getHeight();
+        Matrix matrix = new Matrix();
+        matrix.setRotate(alpha);
+        // 围绕原地进行旋转
+        Bitmap newBM = Bitmap.createBitmap(origin, 0, 0, width, height, matrix, false);
+        if (newBM.equals(origin)) {
+            return newBM;
+        }
+        origin.recycle();
+        return newBM;
+    }
 
     /**
      * {@link CaptureRequest.Builder} for the camera preview
@@ -505,6 +577,14 @@ public class Camera2BasicFragment extends Fragment
         azimuthAngle2 = (TextView) view.findViewById(R.id.azimuth_angle_value2);
         tv_location = (TextView) view.findViewById(R.id.tv_location);
         RA_value=(TextView) view.findViewById(R.id.RA);
+        btn_take_photo = view.findViewById(R.id.btn_take_photo);
+
+        btn_take_photo.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                takePicture();
+            }
+        });
         name = view.findViewById(R.id.tv_name);
 
         return view;
@@ -513,6 +593,7 @@ public class Camera2BasicFragment extends Fragment
     @Override
     public void onActivityCreated(@Nullable Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
+        mFile = new File(getActivity().getExternalFilesDir(null), "pic.jpg");
         init();
     }
 
@@ -533,10 +614,10 @@ public class Camera2BasicFragment extends Fragment
     @SuppressLint("SetTextI18n")
     private void calculateOrientation() {
         float[] values = new float[3];
+        float[] v = new float[3];
         float[] R = new float[9];
 
-        SensorManager.getRotationMatrix(R, null, accelerometerValues,
-                magneticFieldValues);
+        SensorManager.getRotationMatrix(R, null, accelerometerValues, magneticFieldValues);
         SensorManager.getOrientation(R, values);
 
         //获取时间
@@ -556,30 +637,30 @@ public class Camera2BasicFragment extends Fragment
         //秒
         int second = calendar.get(Calendar.SECOND);
 
-        values[1] = (float) Math.toDegrees(values[1]);
-        values[1] = values[1] - 90;
-        if (values[1] < -90) {
-            values[1] = values[1] + 180;
+        v[0] = (float) Math.toDegrees(values[0]);
+        v[1] = (float) Math.toDegrees(values[1]);
+
+        if(v[0]<0){
+            v[0] = v[0]+360;
         }
-        //方位角转化
-        values[0] = (float) Math.toDegrees(values[0]);
-        if(values[1]>0 )
-        {
-            values[0]=values[0]-180;
-            values[0]=values[0]%360;
+        v[1] = v[1] + 90;
+        if (v[1] > 90) {
+            v[1] = 180 - v[1];
+        }else {
+            v[0]=v[0]+180;
+            v[0]=v[0]%360;
         }
 
-        values[0]=(float)(values[0]*(3.14/180));
-        values[1] = (float) (values[1] * (3.14 / 180));
-
+        values[0] = (float) Math.toRadians(v[0]);
+        values[1] = (float) Math.toRadians(v[1]);
 
         //将地平坐标转化成天体坐标
-        wei= (float) (39.05*(3.14/180));//将纬度转化为弧度
+        wei= (float) Math.toRadians(39.05);//将纬度转化为弧度
         DecS=(Math.sin(wei)*Math.sin(values[1]))+(Math.cos(wei)*Math.cos(values[1])*Math.cos(values[0]));//赤纬的sin值
         Dec=(float)Math.toDegrees(Math.asin(DecS));
 
-        jin=(float)(117.13*(3.14/180));
-        RAC=(float)((-Math.cos(jin))*Math.sin(values[1]))+(Math.sin(jin)*Math.cos(values[1])*Math.cos(values[0]));
+        jin=(float) Math.toRadians(117.13);
+        RAC=(float)((-Math.cos(wei))*Math.sin(values[1]))+(Math.sin(wei)*Math.cos(values[1])*Math.cos(values[0]));
         RAS=(float)Math.sin(values[0])*Math.cos(values[1]);
         HC=RAC/Math.cos(Math.asin(DecS));
         HS=RAS/Math.cos(Math.asin(DecS));
@@ -590,6 +671,10 @@ public class Camera2BasicFragment extends Fragment
         }
         RA1=RA1/15;
         //计算恒星时
+        if(month == 1 || month == 2){
+            year = year - 1;
+            month = month + 12;
+        }
         UT=hour-8;
         JD1=(int)(365.25*year);
         JD2= (int) (year/400.0);
@@ -597,64 +682,55 @@ public class Camera2BasicFragment extends Fragment
         JD4=(int)(30.59*(month-2));
         JD= (float) (JD1+ JD2-JD3+JD4+day+1721088.5+(UT/24)+(minute/1440)+(second/86400));
         MJD= (float) (JD-2400000.5);
-        GP= (float) ((float) 24*(0.671262+(1.0027379094*MJD)));
+        GP= (float) ((float)24*(0.671262+(1.0027379094*MJD)));
         LST= (float) (GP*(117.13/15.0));
 
         // LST= (float) 690445.06814;
-        if(LST>24||LST<0)
-        {
+        if(LST>24||LST<0) {
             LST=LST%24;
-
         }
-
 
         //计算赤经
         RA= LST-RA1;
         DecimalFormat myformat=new DecimalFormat("0.00");
         String str = myformat.format(RA);
 
-        //将弧度转化为角度
-        values[0] = (float) Math.toDegrees(values[0]);
-        values[1] = (float) Math.toDegrees(values[1]);
-        values[2] = (float) Math.toDegrees(values[2]);
-
         //将度数输出
 
-        if(values[0]<0){
-            anglenew= values[0]+360;
-            azimuthAngle2.setText( " "+(int)anglenew)  ;
-        }else{
-            azimuthAngle2.setText( (int) values[0]+" ");}
+        v[0] = (float) Math.toDegrees(values[0]);
+        v[1] = (float) Math.toDegrees(values[1]);
+        v[2] = (float) Math.toDegrees(values[2]);
 
-        pichAngle.setText( (int) values[1]+" ");
-        RollAngle.setText( (int) values[2]+" ");
-        tv_location.setText((int)Dec +" ");
-        RA_value.setText(str+" ");
+        azimuthAngle2.setText( (int) v[0]+" ");
+        pichAngle.setText( "pitchAngle："+(int) v[1]+" ");
+        RollAngle.setText( "RollAngle："+(int) v[2]+" ");
+        tv_location.setText("DEC："+(int)Dec +" ");
+        RA_value.setText("RA："+str+" ");
 
-        if (values[0] >= -5 && values[0] < 5) {
-            azimuthAngle.setText("正北");
-        } else if (values[0] >= 5 && values[0] < 85) {
+        if (v[0] >= -5 && v[0] < 5) {
+            azimuthAngle.setText("azimuthAngle：正北");
+        } else if (v[0] >= 5 && v[0] < 85) {
             // Log.i(TAG, "东北");
-            azimuthAngle.setText("东北");
-        } else if (values[0] >= 85 && values[0] <= 95) {
+            azimuthAngle.setText("azimuthAngle：东北");
+        } else if (v[0] >= 85 && v[0] <= 95) {
             // Log.i(TAG, "正东");
-            azimuthAngle.setText("正东");
-        } else if (values[0] >= 95 && values[0] < 175) {
+            azimuthAngle.setText("azimuthAngle：正东");
+        } else if (v[0] >= 95 && v[0] < 175) {
             // Log.i(TAG, "东南");
-            azimuthAngle.setText("东南");
-        } else if ((values[0] >= 175 && values[0] <= 180)
-                || (values[0]) >= -180 && values[0] < -175) {
+            azimuthAngle.setText("azimuthAngle：东南");
+        } else if ((v[0] >= 175 && v[0] <= 180)
+                || (v[0]) >= -180 && v[0] < -175) {
             // Log.i(TAG, "正南");
-            azimuthAngle.setText("正南");
-        } else if (values[0] >= -175 && values[0] < -95) {
+            azimuthAngle.setText("azimuthAngle：正南");
+        } else if (v[0] >= -175 && v[0] < -95) {
             // Log.i(TAG, "西南");
-            azimuthAngle.setText("西南");
-        } else if (values[0] >= -95 && values[0] < -85) {
+            azimuthAngle.setText("azimuthAngle：西南");
+        } else if (v[0] >= -95 && v[0] < -85) {
             // Log.i(TAG, "正西");
-            azimuthAngle.setText("正西");
-        } else if (values[0] >= -85 && values[0] < -5) {
+            azimuthAngle.setText("azimuthAngle：正西");
+        } else if (v[0] >= -85 && v[0] < -5) {
             // Log.i(TAG, "西北");
-            azimuthAngle.setText("西北");
+            azimuthAngle.setText("azimuthAngle：西北");
         }
 
         int length = array.size();
@@ -1008,7 +1084,7 @@ public class Camera2BasicFragment extends Fragment
     }
 
     /**
-     * Configures the necessary {@link android.graphics.Matrix} transformation to `mTextureView`.
+     * Configures the necessary {@link Matrix} transformation to `mTextureView`.
      * This method should be called after the camera preview size is determined in
      * setUpCameraOutputs and also the size of `mTextureView` is fixed.
      *

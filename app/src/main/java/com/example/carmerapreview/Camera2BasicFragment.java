@@ -1303,15 +1303,15 @@ public class Camera2BasicFragment extends Fragment
             RequestBody fileBody = RequestBody.create(MediaType.parse("image/*"), mFile);
 
             //3.构建MultipartBody
-//            RequestBody requestBody = new MultipartBody.Builder()
-//                    .setType(MultipartBody.FORM)
-//                    .addFormDataPart("file", System.currentTimeMillis()+".jpg", fileBody)
-//                    .build();
+            RequestBody requestBody = new MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("file", System.currentTimeMillis()+".jpg", fileBody)
+                    .build();
 
             //4.构建请求
             Request request = new Request.Builder()
                     .url("http://59.67.152.237/starname/findname.php")
-//                    .post(requestBody)
+                    .post(requestBody)
                     .build();
 
             //5.发送请求

@@ -25,6 +25,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -59,6 +60,7 @@ import android.os.HandlerThread;
 import android.os.Message;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.UiThread;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.DialogFragment;
 import android.support.v4.app.Fragment;
@@ -85,6 +87,7 @@ import com.alibaba.fastjson.JSONArray;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
@@ -95,6 +98,15 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 public class Camera2BasicFragment extends Fragment
         implements ActivityCompat.OnRequestPermissionsResultCallback {
@@ -326,13 +338,30 @@ public class Camera2BasicFragment extends Fragment
         @Override
         public void onImageAvailable(ImageReader reader) {
             Image image = reader.acquireNextImage();
-            showDialog(image);
-            mBackgroundHandler.post(new ImageSaver(image, mFile));
+            mBackgroundHandler.post(new ImageSaver( image, mFile, new ImageSaver.UploadCallback() {
+                @Override
+                public void onResult(final Response response, final boolean error) {
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+
+                            if (error) {
+                                Toast.makeText(getContext(), "上传失败", Toast.LENGTH_SHORT).show();
+                            } else {
+                                InputStream inputStream = response.body().byteStream();//得到图片的流
+                                Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+                                showDialog(bitmap);
+                                Toast.makeText(getContext(), "上传成功", Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                    });
+                }
+            }));
         }
 
     };
 
-    private void showDialog(Image imageFile) {
+    private void showDialog(Bitmap bitmap) {
         View view = LayoutInflater.from(getContext()).inflate(R.layout.dialog_preview,null,false);
 
         final AlertDialog normalDialog =
@@ -352,11 +381,12 @@ public class Camera2BasicFragment extends Fragment
 
         ImageView image = view.findViewById(R.id.image_view);
 
-        ByteBuffer buffer = imageFile.getPlanes()[0].getBuffer();
-        byte[] bytes = new byte[buffer.remaining()];
-        buffer.get(bytes);
-        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-        image.setImageBitmap(rotateBitmap(bitmap, 90));
+//        ByteBuffer buffer = imageFile.getPlanes()[0].getBuffer();
+//        byte[] bytes = new byte[buffer.remaining()];
+//        buffer.get(bytes);
+//        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+
+        image.setImageBitmap(bitmap);
 
         normalDialog.show();
 
@@ -1259,9 +1289,52 @@ public class Camera2BasicFragment extends Fragment
          */
         private final File mFile;
 
-        ImageSaver(Image image, File file) {
+        private UploadCallback mUploadCallback;
+
+        ImageSaver(Image image, File file, UploadCallback callback) {
             mImage = image;
             mFile = file;
+            mUploadCallback = callback;
+        }
+
+        private void upload() throws IOException{
+            OkHttpClient client = new OkHttpClient();
+            //2.创建RequestBody
+            RequestBody fileBody = RequestBody.create(MediaType.parse("image/*"), mFile);
+
+            //3.构建MultipartBody
+//            RequestBody requestBody = new MultipartBody.Builder()
+//                    .setType(MultipartBody.FORM)
+//                    .addFormDataPart("file", System.currentTimeMillis()+".jpg", fileBody)
+//                    .build();
+
+            //4.构建请求
+            Request request = new Request.Builder()
+                    .url("http://59.67.152.237/starname/findname.php")
+//                    .post(requestBody)
+                    .build();
+
+            //5.发送请求
+            client.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    if (mUploadCallback != null) {
+                        mUploadCallback.onResult(null, true);
+                    }
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) throws IOException {
+
+                    if (mUploadCallback != null) {
+                        mUploadCallback.onResult(response, false);
+                    }
+                }
+            });
+        }
+
+        public interface UploadCallback {
+            void onResult(Response response, boolean error);
         }
 
         @Override
@@ -1284,6 +1357,12 @@ public class Camera2BasicFragment extends Fragment
                         e.printStackTrace();
                     }
                 }
+            }
+
+            try {
+                upload();
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         }
 
